@@ -33,22 +33,49 @@
   @media (prefers-color-scheme: dark) { .notice { background:#3a3014; color:#f3dc9b; border-color:#6b5a26; } }
   .notice a { color:inherit; font-weight:600; }
   .hint { font-size:13px; color:var(--muted); margin-top:4px; }
+  .seg { display:flex; background:var(--line); border-radius:10px; padding:3px; gap:3px; }
+  .seg button { margin:0; padding:8px; font-size:15px; background:transparent; color:var(--fg); border-radius:8px; font-weight:600; }
+  .seg button.on { background:var(--card); box-shadow:0 1px 3px rgba(0,0,0,.15); }
+  textarea { width:100%; font-family:inherit; font-size:18px; line-height:1.4; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--fg); resize:vertical; }
+  .chips { display:flex; gap:8px; overflow-x:auto; padding:8px 0 2px; }
+  .chip { flex:none; width:auto; margin:0; padding:7px 12px; font-size:14px; font-weight:500; border-radius:999px; background:var(--line); color:var(--fg); white-space:nowrap; }
+  .chip.on { background:var(--accent); color:#fff; }
+  .chip .x { margin-left:6px; opacity:.6; }
+  button.small { width:auto; padding:8px 12px; font-size:14px; margin-top:8px; }
+  dl.stat { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; font-size:15px; }
+  dl.stat dt { color:var(--muted); } dl.stat dd { margin:0; text-align:right; font-weight:600; }
+  .warn { color:var(--err); } .mid { color:#d97a00; }
   details { font-size:14px; color:var(--muted); } details summary { cursor:pointer; }
 </style>
 </head>
 <body>
 <main>
   <h1>블랙코드 번호 변경</h1>
-  <p class="sub">블루투스로 블랙코드 단말기 화면의 번호만 바꿉니다. 서버 없이 동작합니다.</p>
+  <p class="sub">블루투스로 블랙코드 단말기 화면에 번호나 메모를 띄웁니다. 서버 없이 동작합니다.</p>
 
   <div class="card notice" id="noBt" hidden></div>
 
   <div class="card">
-    <label for="num">표시할 번호</label>
+    <div class="seg" role="tablist">
+      <button type="button" id="modeNumber" class="on">번호</button>
+      <button type="button" id="modeMemo">메모</button>
+    </div>
+    <label for="num">연락받을 번호</label>
     <input id="num" type="text" inputmode="numeric" value="010-1234-5678" autocomplete="off">
-    <div class="hint">숫자만 입력하면 하이픈(-)이 자동으로 들어갑니다.</div>
-    <label for="lbl">위쪽 문구 (비우면 번호만 표시)</label>
-    <input id="lbl" type="text" value="주차 연락처" autocomplete="off">
+    <div class="hint" id="numHint">숫자만 입력하면 하이픈(-)이 자동으로 들어갑니다.</div>
+    <div id="numberBox">
+      <label for="lbl">위쪽 문구 (비우면 번호만 표시)</label>
+      <input id="lbl" type="text" value="주차 연락처" autocomplete="off">
+    </div>
+    <div id="memoBox" hidden>
+      <label for="memo">메모 (줄바꿈으로 최대 4줄)</label>
+      <textarea id="memo" rows="3">잠시 자리 비움
+5분 안에 돌아옵니다</textarea>
+      <div class="chips" id="chips"></div>
+      <button type="button" class="secondary small" id="saveMemo">☆ 지금 메모를 자주 쓰는 메모에 저장</button>
+      <div class="hint">자주 쓰는 메모를 누르면 바로 채워집니다. ✕로 삭제할 수 있어요.</div>
+    </div>
+    <div class="row"><label><input type="checkbox" id="qr"> 전화 걸기 QR코드 함께 표시</label></div>
     <div class="row">
       <label><input type="checkbox" id="rot180"> 180° 뒤집기</label>
       <label><input type="checkbox" id="invert"> 흑백 반전</label>
@@ -61,7 +88,14 @@
     <button id="btnSend">단말기에 연결해서 전송</button>
     <div class="row"><label><input type="checkbox" id="allDev"> 목록에 안 보이면 체크 (모든 블루투스 기기 표시)</label></div>
     <progress id="prog" value="0" max="1" hidden></progress>
+    <button id="btnStatus" class="secondary">단말기 상태만 확인</button>
     <div id="status" style="margin-top:10px">대기 중</div>
+  </div>
+
+  <div class="card" id="statCard" hidden>
+    <label style="margin-top:0">단말기 상태</label>
+    <dl class="stat" id="stat"></dl>
+    <div class="hint" id="statWarn"></div>
   </div>
 
   <details class="card">
@@ -74,6 +108,7 @@
   </details>
 </main>
 
+<script src="qrcode.js"></script>
 <script>
 const SVC   = "a9caf648-b78a-49a5-8af7-ed4e5a8d28f5";
 const READ  = "2fcb4912-23a7-446e-8a1e-8e1a1a0f80c6"; // ALLVARS_READ
@@ -98,16 +133,69 @@ function fitFont(text, weight, maxW, maxH) {
   return size;
 }
 
+let mode = "number";
+const FONT = '-apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif';
+
+function fitIn(text, weight, maxW, maxH) {
+  let size = maxH;
+  while (size > 8) {
+    ctx.font = `${weight} ${size}px ${FONT}`;
+    if (ctx.measureText(text).width <= maxW) break;
+    size--;
+  }
+  return size;
+}
+
+function qrMatrix(text) {
+  try {
+    const q = qrcode(0, "M"); q.addData(text); q.make();
+    const n = q.getModuleCount(), m = [];
+    for (let r = 0; r < n; r++) { const row = []; for (let c = 0; c < n; c++) row.push(q.isDark(r, c)); m.push(row); }
+    return m;
+  } catch (e) { return null; }
+}
+
 function draw() {
   const num = $("num").value.trim(), lbl = $("lbl").value.trim();
+  const digits = num.replace(/\D/g, "");
   ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  if (lbl) {
-    fitFont(lbl, 600, W - 20, 26); ctx.fillText(lbl, W / 2, 24);
-    ctx.fillRect(20, 44, W - 40, 2);
-    fitFont(num, 800, W - 16, 60); ctx.fillText(num, W / 2, 88);
+
+  // QR on the right (generated in the browser from the number — no service involved)
+  let ax = 0, aw = W;
+  const qr = $("qr").checked && digits.length >= 3 ? qrMatrix("tel:" + digits) : null;
+  if (qr) {
+    const n = qr.length, sc = Math.max(1, Math.floor(112 / n)), size = n * sc;
+    const x0 = W - size - 6, y0 = Math.floor((H - size) / 2);
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (qr[r][c]) ctx.fillRect(x0 + c * sc, y0 + r * sc, sc, sc);
+    aw = x0 - 4;
+  }
+  const cx = ax + aw / 2, narrow = aw < W;
+
+  if (mode === "number") {
+    if (lbl) {
+      fitIn(lbl, 600, aw - 16, narrow ? 22 : 26); ctx.fillText(lbl, cx, 24);
+      ctx.fillRect(ax + 12, 44, aw - 24, 2);
+      fitIn(num, 800, aw - 12, 60); ctx.fillText(num, cx, 88);
+    } else {
+      fitIn(num, 800, aw - 12, 80); ctx.fillText(num, cx, H / 2 + 2);
+    }
   } else {
-    fitFont(num, 800, W - 16, 80); ctx.fillText(num, W / 2, H / 2 + 2);
+    const lines = $("memo").value.split("\n").map(l => l.trim()).slice(0, 4);
+    while (lines.length && !lines[lines.length - 1]) lines.pop();
+    if (lines.length) {
+      const maxW = aw - 16, maxH = H - 12;
+      let size = 44;
+      while (size > 8) {
+        ctx.font = `700 ${size}px ${FONT}`;
+        const widest = Math.max(...lines.map(l => ctx.measureText(l).width));
+        if (widest <= maxW && size * 1.2 * lines.length <= maxH) break;
+        size--;
+      }
+      const lh = size * 1.2;
+      let y = H / 2 - lh * lines.length / 2 + lh / 2;
+      lines.forEach(l => { ctx.fillText(l, cx, y); y += lh; });
+    }
   }
   // 1-bit threshold so the preview matches the device
   const img = ctx.getImageData(0, 0, W, H), d = img.data;
@@ -132,7 +220,7 @@ const store = {
   get(k) { try { return localStorage.getItem("bc_" + k); } catch (e) { return null; } },
   set(k, v) { try { localStorage.setItem("bc_" + k, v); } catch (e) {} }
 };
-[["num", "value"], ["lbl", "value"], ["rot180", "checked"], ["invert", "checked"]].forEach(([id, prop]) => {
+[["num", "value"], ["lbl", "value"], ["memo", "value"], ["qr", "checked"], ["rot180", "checked"], ["invert", "checked"]].forEach(([id, prop]) => {
   const v = store.get(id);
   if (v !== null) $(id)[prop] = prop === "checked" ? v === "1" : v;
   $(id).addEventListener(prop === "checked" ? "change" : "input", () => store.set(id, prop === "checked" ? ($(id).checked ? "1" : "0") : $(id).value));
@@ -144,6 +232,50 @@ $("num").addEventListener("input", e => {
   draw();
 });
 $("lbl").addEventListener("input", draw);
+$("memo").addEventListener("input", () => { draw(); renderChips(); });
+$("qr").addEventListener("change", () => {
+  $("numHint").textContent = $("qr").checked
+    ? "QR코드는 위 번호로 자동 생성됩니다. 휴대폰 카메라로 찍으면 바로 전화가 걸립니다."
+    : "숫자만 입력하면 하이픈(-)이 자동으로 들어갑니다.";
+  draw();
+});
+
+function setMode(m) {
+  mode = m; store.set("mode", m);
+  $("modeNumber").classList.toggle("on", m === "number");
+  $("modeMemo").classList.toggle("on", m === "memo");
+  $("numberBox").hidden = m !== "number";
+  $("memoBox").hidden = m !== "memo";
+  draw();
+}
+$("modeNumber").addEventListener("click", () => setMode("number"));
+$("modeMemo").addEventListener("click", () => setMode("memo"));
+
+const DEFAULT_PRESETS = ["잠시 자리 비움\n5분 안에 돌아옵니다", "전화 주시면\n바로 빼드릴게요", "외출 중\n문자 남겨주세요"];
+function getPresets() { try { const v = JSON.parse(store.get("presets")); return Array.isArray(v) ? v : DEFAULT_PRESETS; } catch (e) { return DEFAULT_PRESETS; } }
+function setPresets(list) { store.set("presets", JSON.stringify(list)); renderChips(); }
+function renderChips() {
+  const box = $("chips"); box.textContent = "";
+  const cur = $("memo").value.trim();
+  getPresets().forEach(p => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "chip" + (p === cur ? " on" : "");
+    b.textContent = p.replace(/\n/g, " ");
+    const x = document.createElement("span"); x.className = "x"; x.textContent = "✕";
+    x.addEventListener("click", e => { e.stopPropagation(); setPresets(getPresets().filter(q => q !== p)); });
+    b.appendChild(x);
+    b.addEventListener("click", () => { $("memo").value = p; store.set("memo", p); draw(); renderChips(); });
+    box.appendChild(b);
+  });
+  $("saveMemo").disabled = !cur || getPresets().includes(cur);
+}
+$("saveMemo").addEventListener("click", () => {
+  const m = $("memo").value.trim();
+  if (m && !getPresets().includes(m)) setPresets([m, ...getPresets()]);
+});
+renderChips();
+$("qr").dispatchEvent(new Event("change"));
+setMode(store.get("mode") === "memo" ? "memo" : "number");
 $("num").value = formatPhone($("num").value);
 draw();
 
@@ -189,10 +321,27 @@ function buildBmp() {
 function be32(v) { return [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]; }
 function be16(v) { return [(v >>> 8) & 255, v & 255]; }
 
-async function send() {
+function batteryText(b) { return b >= 50 ? "충분" : b > 30 ? "보통" : b > 15 ? "낮음" : "교체 필요"; }
+function showStatus(st) {
+  $("statCard").hidden = false;
+  const bcls = st.batt <= 15 ? "warn" : st.batt <= 30 ? "mid" : "";
+  const safe = st.temp >= 0 && st.temp <= 50;
+  $("stat").innerHTML = "";
+  [["배터리", `${batteryText(st.batt)} (${st.batt})`, bcls], ["차 안 온도", `${st.temp}℃`, safe ? "" : "warn"],
+   ["시리얼", st.sn || "-", ""], ["확인 시각", new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }), ""]]
+    .forEach(([k, v, c]) => {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v; if (c) dd.className = c;
+      $("stat").append(dt, dd);
+    });
+  $("statWarn").textContent = safe ? "" : "0~50℃를 벗어나면 전자잉크 보호를 위해 화면을 바꾸지 않습니다.";
+  $("statWarn").className = "hint" + (safe ? "" : " warn");
+}
+
+async function send(statusOnly = false) {
   clearLog();
   if (!navigator.bluetooth) { log("이 브라우저는 웹 블루투스를 지원하지 않습니다. 안드로이드 Chrome 또는 아이폰 Bluefy 앱을 사용하세요.", "err"); return; }
-  const btn = $("btnSend"); btn.disabled = true;
+  const btns = [$("btnSend"), $("btnStatus")]; btns.forEach(b => b.disabled = true);
   const prog = $("prog"); prog.hidden = true;
   let dev;
   try {
@@ -205,15 +354,28 @@ async function send() {
     const svc = await gatt.getPrimaryService(SVC);
 
     // 1) Read current state
-    let appmode = 1, appid = 0;
+    let appmode = 1, appid = 0, st = null;
     try {
       const v = await (await svc.getCharacteristic(READ)).readValue();
       const b = new Uint8Array(v.buffer);
       const txt = (a, s, e) => new TextDecoder().decode(a.slice(s, e)).replace(/\0/g, "").trim();
       const sn = txt(b, 4, 14), w = v.getInt16(38), h = v.getInt16(36), batt = v.getInt8(42), temp = v.getInt8(45);
       if (b.length >= 64) { appmode = v.getInt32(52); appid = v.getInt32(56); }
-      log(`시리얼 ${sn} · 화면 ${w}×${h} · 배터리 ${batt} · 온도 ${temp}℃ · 모드 ${appmode}`);
+      st = { sn, batt, temp };
+      showStatus(st);
+      log(`시리얼 ${sn} · 화면 ${w}×${h} · 배터리 ${batt}(${batteryText(batt)}) · 온도 ${temp}℃`);
     } catch (e) { log("상태 읽기 건너뜀: " + e.message); }
+
+    if (statusOnly) {
+      log(st ? "상태 확인 완료" : "이 기기에서는 상태를 읽을 수 없습니다.", st ? "ok" : "err");
+      dev.gatt.disconnect();
+      return;
+    }
+    if (st && (st.temp > 50 || st.temp < 0)) {
+      log(`차 안 온도가 ${st.temp}℃라서 화면을 바꾸지 않았어요. 전자잉크 보호를 위해 0~50℃에서만 바꿀 수 있습니다(원래 앱과 같은 기준).`, "err");
+      dev.gatt.disconnect();
+      return;
+    }
 
     // 2) Make sure the device is in display mode (appmode 1), as the app does on registration
     if (appmode !== 1) {
@@ -256,9 +418,10 @@ async function send() {
     if (e.name === "NotFoundError") log("기기 선택이 취소됐거나 찾지 못했습니다. 목록에 안 보이면 위 체크박스를 켜고 다시 시도하세요.", "err");
     else log("오류: " + e.message, "err");
     try { dev && dev.gatt.disconnect(); } catch (_) {}
-  } finally { btn.disabled = false; }
+  } finally { btns.forEach(b => b.disabled = false); }
 }
-$("btnSend").addEventListener("click", send);
+$("btnSend").addEventListener("click", () => send(false));
+$("btnStatus").addEventListener("click", () => send(true));
 </script>
 </body>
 </html>
