@@ -75,6 +75,7 @@
     <div class="row"><label><input type="checkbox" id="allDev"> 목록에 안 보이면 체크 (모든 블루투스 기기 표시)</label></div>
     <progress id="prog" value="0" max="1" hidden></progress>
     <div id="status" style="margin-top:8px"></div>
+    <div class="hint">처음 연결할 때는 <b>단말기 버튼을 한 번 눌러 화면이 깜빡이게 한 뒤</b> 바로 「단말기 연결」을 누르세요. 평소엔 절전 중이라 목록에 안 나옵니다. 그래도 안 보이면 체크박스를 켜고 신호가 가장 센 기기를 고르세요.</div>
     <div class="hint">연결해두면 이 페이지가 열려 있는 동안 1분마다 자동으로 확인합니다.</div>
   </div>
 
@@ -371,7 +372,7 @@ function withTimeout(promise, ms) {
 async function pickDevice() {
   const opts = $("allDev").checked
     ? { acceptAllDevices: true, optionalServices: [SVC] }
-    : { filters: [{ services: [SVC] }], optionalServices: [SVC] };
+    : { filters: [{ services: [SVC] }, { namePrefix: "BK" }, { namePrefix: "BLACK" }, { namePrefix: "Black" }, { namePrefix: "BLK" }], optionalServices: [SVC] };
   myDev = await navigator.bluetooth.requestDevice(opts);
   store.set("devName", myDev.name || "블랙코드");
   return myDev;
