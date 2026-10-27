@@ -415,7 +415,8 @@ async function runOp(kind, silent = false) {
     if (kind === "status") {
       if (!st) { renderCard("unreachable"); L("이 기기에서는 상태를 읽을 수 없습니다.", "err"); }
       else L("상태 확인 완료", "ok");
-      dev.gatt.disconnect();
+      // If a send is waiting behind this background check, keep the link up and reuse it.
+      if (!(st && pendingOp)) dev.gatt.disconnect();
       return;
     }
     if (st && (st.temp > 50 || st.temp < 0)) {
@@ -471,7 +472,7 @@ async function runOp(kind, silent = false) {
     running = false; silentRun = false;
     btns.forEach(b => b.disabled = false);
     if ($("stateText").textContent === "확인 중…") renderCard();
-    if (pendingOp) { const k = pendingOp; pendingOp = null; setTimeout(() => runOp(k), 500); }
+    if (pendingOp) { const k = pendingOp; pendingOp = null; setTimeout(() => runOp(k), myDev && myDev.gatt.connected ? 0 : 500); }
   }
 }
 
