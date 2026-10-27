@@ -1,0 +1,15 @@
+{
+  "name": "블랙코드 번호 변경",
+  "short_name": "블랙코드",
+  "description": "블랙코드 주차번호판 단말기 화면 번호를 블루투스로 직접 바꿉니다.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f4f2",
+  "theme_color": "#1f5eff",
+  "lang": "ko",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

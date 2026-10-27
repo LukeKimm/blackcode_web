@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>블랙코드 번호 변경</title>
+<meta name="description" content="서비스가 종료된 블랙코드 주차번호판 단말기의 화면 번호를 블루투스로 직접 바꿉니다.">
+<meta name="theme-color" content="#1f5eff">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<style>
+  :root { --bg:#f4f4f2; --card:#fff; --fg:#1a1a1a; --muted:#6b6b6b; --line:#ddd; --accent:#1f5eff; --ok:#16803c; --err:#c0262d; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141414; --card:#1e1e1e; --fg:#eee; --muted:#9a9a9a; --line:#333; --accent:#6d93ff; --ok:#4cc27a; --err:#ff6b70; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif; }
+  main { max-width:520px; margin:0 auto; padding:20px 16px 40px; }
+  h1 { font-size:22px; margin:4px 0 4px; }
+  p.sub { color:var(--muted); margin:0 0 18px; font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:16px; margin-bottom:14px; }
+  label { display:block; font-size:13px; color:var(--muted); margin:10px 0 4px; }
+  input[type=text], input[type=tel] { width:100%; font-size:20px; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:transparent; color:var(--fg); }
+  .row { display:flex; gap:14px; flex-wrap:wrap; margin-top:10px; font-size:14px; }
+  .row label { display:flex; align-items:center; gap:6px; margin:0; color:var(--fg); font-size:14px; }
+  button { width:100%; font-size:17px; font-weight:600; padding:13px; border:0; border-radius:12px; background:var(--accent); color:#fff; margin-top:10px; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--accent); }
+  button:disabled { opacity:.45; }
+  canvas#preview { width:100%; image-rendering:pixelated; border:6px solid #333; border-radius:8px; background:#fff; display:block; }
+  #status { font-size:14px; white-space:pre-wrap; color:var(--muted); }
+  #status .ok { color:var(--ok); } #status .err { color:var(--err); }
+  progress { width:100%; height:10px; margin-top:8px; }
+  .notice { background:#fff4d6; color:#5a4300; border:1px solid #f0d58a; }
+  @media (prefers-color-scheme: dark) { .notice { background:#3a3014; color:#f3dc9b; border-color:#6b5a26; } }
+  .notice a { color:inherit; font-weight:600; }
+  .hint { font-size:13px; color:var(--muted); margin-top:4px; }
+  details { font-size:14px; color:var(--muted); } details summary { cursor:pointer; }
+</style>
+</head>
+<body>
+<main>
+  <h1>블랙코드 번호 변경</h1>
+  <p class="sub">블루투스로 블랙코드 단말기 화면의 번호만 바꿉니다. 서버 없이 동작합니다.</p>
+
+  <div class="card notice" id="noBt" hidden></div>
+
+  <div class="card">
+    <label for="num">표시할 번호</label>
+    <input id="num" type="text" inputmode="numeric" value="010-1234-5678" autocomplete="off">
+    <div class="hint">숫자만 입력하면 하이픈(-)이 자동으로 들어갑니다.</div>
+    <label for="lbl">위쪽 문구 (비우면 번호만 표시)</label>
+    <input id="lbl" type="text" value="주차 연락처" autocomplete="off">
+    <div class="row">
+      <label><input type="checkbox" id="rot180"> 180° 뒤집기</label>
+      <label><input type="checkbox" id="invert"> 흑백 반전</label>
+    </div>
+    <label>미리보기 (296×128)</label>
+    <canvas id="preview" width="296" height="128"></canvas>
+  </div>
+
+  <div class="card">
+    <button id="btnSend">단말기에 연결해서 전송</button>
+    <div class="row"><label><input type="checkbox" id="allDev"> 목록에 안 보이면 체크 (모든 블루투스 기기 표시)</label></div>
+    <progress id="prog" value="0" max="1" hidden></progress>
+    <div id="status" style="margin-top:10px">대기 중</div>
+  </div>
+
+  <details class="card">
+    <summary>사용 팁</summary>
+    <p>• 단말기를 휴대폰 가까이 두고, 전송 중에는 화면을 끄지 마세요. 전자잉크라 갱신까지 몇 초 걸립니다.</p>
+    <p>• 글씨가 거꾸로 나오면 「180° 뒤집기」, 검은 바탕에 흰 글씨로 나오면 「흑백 반전」을 켜고 다시 전송하세요.</p>
+    <p>• 안드로이드 Chrome에서는 메뉴 → 「홈 화면에 추가」로 앱처럼 설치할 수 있습니다.</p>
+    <p>• 아이폰 Safari/Chrome은 웹 블루투스를 지원하지 않습니다. 아이폰은 App Store의 「Bluefy」 앱으로 이 주소를 여세요.</p>
+    <p>• 입력한 번호와 설정은 이 기기에만 저장되며 어디로도 전송되지 않습니다.</p>
+  </details>
+</main>
+
+<script>
+const SVC   = "a9caf648-b78a-49a5-8af7-ed4e5a8d28f5";
+const READ  = "2fcb4912-23a7-446e-8a1e-8e1a1a0f80c6"; // ALLVARS_READ
+const WRITE = "36db0685-92e1-475c-9e22-9fdd50c08d11"; // ALLVARS_WRITE
+const DISP  = "958662b1-a5f1-4235-890f-5b9cb1160329"; // UPDATEDISPLAY_WRITE
+const BEEP  = "9e21a911-baa3-4c88-a4ef-f2533fe88365"; // BEEPALARM (notify)
+const W = 296, H = 128, CHUNK = 220, PKT = 244;
+
+const $ = id => document.getElementById(id);
+const cv = $("preview"), ctx = cv.getContext("2d");
+const statusEl = $("status");
+function log(msg, cls) { const d = document.createElement("div"); if (cls) d.className = cls; d.textContent = msg; statusEl.appendChild(d); }
+function clearLog() { statusEl.textContent = ""; }
+
+function fitFont(text, weight, maxW, maxH) {
+  let size = maxH;
+  while (size > 8) {
+    ctx.font = `${weight} ${size}px -apple-system, "Apple SD Gothic Neo", "Noto Sans KR", sans-serif`;
+    if (ctx.measureText(text).width <= maxW) break;
+    size--;
+  }
+  return size;
+}
+
+function draw() {
+  const num = $("num").value.trim(), lbl = $("lbl").value.trim();
+  ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = "#000"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  if (lbl) {
+    fitFont(lbl, 600, W - 20, 26); ctx.fillText(lbl, W / 2, 24);
+    ctx.fillRect(20, 44, W - 40, 2);
+    fitFont(num, 800, W - 16, 60); ctx.fillText(num, W / 2, 88);
+  } else {
+    fitFont(num, 800, W - 16, 80); ctx.fillText(num, W / 2, H / 2 + 2);
+  }
+  // 1-bit threshold so the preview matches the device
+  const img = ctx.getImageData(0, 0, W, H), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const v = (d[i] * 0.299 + d[i+1] * 0.587 + d[i+2] * 0.114) < 128 ? 0 : 255;
+    d[i] = d[i+1] = d[i+2] = v; d[i+3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+function formatPhone(input) {
+  const d = input.replace(/\D/g, "").slice(0, 12);
+  let g;
+  if (d.startsWith("02")) g = d.length <= 9 ? [2, 3, 4] : [2, 4, 4];
+  else if (d.startsWith("050")) g = d.length <= 11 ? [4, 3, 4] : [4, 4, 4];
+  else if (d.startsWith("1")) g = [4, 4, 4];
+  else g = d.length <= 10 ? [3, 3, 4] : [3, 4, 4];
+  const parts = []; let rest = d;
+  g.forEach((n, i) => { if (!rest) return; const t = i === g.length - 1 ? rest.length : Math.min(n, rest.length); parts.push(rest.slice(0, t)); rest = rest.slice(t); });
+  return parts.join("-");
+}
+const store = {
+  get(k) { try { return localStorage.getItem("bc_" + k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem("bc_" + k, v); } catch (e) {} }
+};
+[["num", "value"], ["lbl", "value"], ["rot180", "checked"], ["invert", "checked"]].forEach(([id, prop]) => {
+  const v = store.get(id);
+  if (v !== null) $(id)[prop] = prop === "checked" ? v === "1" : v;
+  $(id).addEventListener(prop === "checked" ? "change" : "input", () => store.set(id, prop === "checked" ? ($(id).checked ? "1" : "0") : $(id).value));
+});
+$("num").addEventListener("input", e => {
+  const f = formatPhone(e.target.value);
+  if (f !== e.target.value) e.target.value = f;
+  store.set("num", f);
+  draw();
+});
+$("lbl").addEventListener("input", draw);
+$("num").value = formatPhone($("num").value);
+draw();
+
+if (!navigator.bluetooth) {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const box = $("noBt"); box.hidden = false;
+  box.innerHTML = ios
+    ? "아이폰 Safari·Chrome은 블루투스 웹 연결을 지원하지 않아요. App Store에서 <a href='https://apps.apple.com/app/id1492822055' target='_blank' rel='noopener'>Bluefy</a> 앱을 설치하고, 그 안에서 이 주소를 열어주세요."
+    : "이 브라우저는 블루투스 웹 연결을 지원하지 않아요. 안드로이드는 Chrome, PC는 Chrome·Edge로 열어주세요.";
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
+// Build the 128x296 1-bpp BMP the device expects (same as the app's BMPFile + makeMonoBitmap: landscape image rotated -90°)
+function buildBmp() {
+  const src = ctx.getImageData(0, 0, W, H).data;
+  const rot180 = $("rot180").checked, inv = $("invert").checked;
+  const OW = H, OH = W;                 // 128 x 296
+  const stride = Math.ceil(OW / 32) * 4; // 16 bytes
+  const pix = new Uint8Array(stride * OH);
+  for (let y = 0; y < OH; y++) {
+    for (let x = 0; x < OW; x++) {
+      // CCW 90°: dest(x,y) <- src(W-1-y, x)
+      let sx = W - 1 - y, sy = x;
+      if (rot180) { sx = W - 1 - sx; sy = H - 1 - sy; }
+      let white = src[(sy * W + sx) * 4] >= 128;
+      if (inv) white = !white;
+      if (white) pix[y * stride + (x >> 3)] |= 0x80 >> (x & 7);
+    }
+  }
+  const size = 62 + pix.length, buf = new ArrayBuffer(size), dv = new DataView(buf);
+  dv.setUint8(0, 0x42); dv.setUint8(1, 0x4D);
+  dv.setUint32(2, size, true); dv.setUint32(10, 62, true);
+  dv.setUint32(14, 40, true); dv.setInt32(18, OW, true); dv.setInt32(22, OH, true);
+  dv.setUint16(26, 1, true); dv.setUint16(28, 1, true);
+  dv.setUint32(46, 2, true); dv.setUint32(50, 2, true);
+  // palette: 0 = black, 1 = white
+  [0,0,0,0xFF, 0xFF,0xFF,0xFF,0xFF].forEach((b, i) => dv.setUint8(54 + i, b));
+  const out = new Uint8Array(buf);
+  for (let r = 0; r < OH; r++) out.set(pix.subarray((OH - 1 - r) * stride, (OH - r) * stride), 62 + r * stride); // bottom-up
+  return out;
+}
+
+function be32(v) { return [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255]; }
+function be16(v) { return [(v >>> 8) & 255, v & 255]; }
+
+async function send() {
+  clearLog();
+  if (!navigator.bluetooth) { log("이 브라우저는 웹 블루투스를 지원하지 않습니다. 안드로이드 Chrome 또는 아이폰 Bluefy 앱을 사용하세요.", "err"); return; }
+  const btn = $("btnSend"); btn.disabled = true;
+  const prog = $("prog"); prog.hidden = true;
+  let dev;
+  try {
+    const opts = $("allDev").checked
+      ? { acceptAllDevices: true, optionalServices: [SVC] }
+      : { filters: [{ services: [SVC] }], optionalServices: [SVC] };
+    dev = await navigator.bluetooth.requestDevice(opts);
+    log(`선택: ${dev.name || "(이름 없음)"} — 연결 중…`);
+    const gatt = await dev.gatt.connect();
+    const svc = await gatt.getPrimaryService(SVC);
+
+    // 1) Read current state
+    let appmode = 1, appid = 0;
+    try {
+      const v = await (await svc.getCharacteristic(READ)).readValue();
+      const b = new Uint8Array(v.buffer);
+      const txt = (a, s, e) => new TextDecoder().decode(a.slice(s, e)).replace(/\0/g, "").trim();
+      const sn = txt(b, 4, 14), w = v.getInt16(38), h = v.getInt16(36), batt = v.getInt8(42), temp = v.getInt8(45);
+      if (b.length >= 64) { appmode = v.getInt32(52); appid = v.getInt32(56); }
+      log(`시리얼 ${sn} · 화면 ${w}×${h} · 배터리 ${batt} · 온도 ${temp}℃ · 모드 ${appmode}`);
+    } catch (e) { log("상태 읽기 건너뜀: " + e.message); }
+
+    // 2) Make sure the device is in display mode (appmode 1), as the app does on registration
+    if (appmode !== 1) {
+      log("표시 모드로 전환 중…");
+      const p = new Uint8Array(56);
+      p.set(be32(Math.floor(Date.now() / 1000)), 0); p.set(be32(1), 4); p.set(be32(appid), 8); p.set(be32(10), 12);
+      p.set(new TextEncoder().encode("H1A"), 16);
+      p.set(new TextEncoder().encode($("num").value.replace(/\D/g, "").slice(0, 16)), 24);
+      await (await svc.getCharacteristic(WRITE)).writeValueWithResponse(p);
+      appmode = 1;
+    }
+
+    // 3) Enable notifications like the app does (harmless if it fails)
+    try { await (await svc.getCharacteristic(BEEP)).startNotifications(); } catch (e) {}
+
+    // 4) Send BMP in 220-byte chunks, 244-byte packets
+    const bmp = buildBmp();
+    const total = Math.ceil(bmp.length / CHUNK);
+    const ch = await svc.getCharacteristic(DISP);
+    prog.hidden = false; prog.max = total; prog.value = 0;
+    log(`화면 데이터 전송 (${bmp.length}바이트, ${total}개 패킷)…`);
+    for (let i = 0; i < total; i++) {
+      const part = bmp.subarray(i * CHUNK, Math.min(bmp.length, (i + 1) * CHUNK));
+      const pkt = new Uint8Array(PKT);
+      pkt.set(be32(Math.floor(Date.now() / 1000)), 0);
+      pkt.set(be32(appmode), 4);
+      pkt.set([0x62, 0x6D, 0x70, 0x31], 8);   // "bmp1"
+      pkt.set(be32(bmp.length), 12);
+      pkt.set(be16(total), 16);
+      pkt.set(be16(i + 1), 18);
+      pkt.set(be16(CHUNK), 20);
+      pkt.set(be16(part.length), 22);
+      pkt.set(part, 24);
+      await ch.writeValueWithResponse(pkt);
+      prog.value = i + 1;
+    }
+    log("전송 완료. 단말기 화면이 바뀔 때까지 몇 초 기다리세요.", "ok");
+    setTimeout(() => { try { dev.gatt.disconnect(); } catch (e) {} }, 3000);
+  } catch (e) {
+    if (e.name === "NotFoundError") log("기기 선택이 취소됐거나 찾지 못했습니다. 목록에 안 보이면 위 체크박스를 켜고 다시 시도하세요.", "err");
+    else log("오류: " + e.message, "err");
+    try { dev && dev.gatt.disconnect(); } catch (_) {}
+  } finally { btn.disabled = false; }
+}
+$("btnSend").addEventListener("click", send);
+</script>
+</body>
+</html>
