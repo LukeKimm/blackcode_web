@@ -42,6 +42,13 @@
   .chip.on { background:var(--accent); color:#fff; }
   .chip .x { margin-left:6px; opacity:.6; }
   button.small { width:auto; padding:8px 12px; font-size:14px; margin-top:8px; }
+  .cardhead { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+  .cardhead b { font-size:17px; } .cardhead span { color:var(--muted); font-size:14px; }
+  .tiles { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .tile { background:var(--bg); border-radius:12px; padding:12px; }
+  .tile .t { font-size:12px; color:var(--muted); } .tile .v { font-size:24px; font-weight:800; margin-top:2px; } .tile .s { font-size:12px; color:var(--muted); }
+  .stateline { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; font-size:13px; color:var(--muted); }
+  button.icon { width:auto; margin:0; padding:6px 12px; font-size:16px; background:transparent; color:var(--accent); border:1px solid var(--line); }
   dl.stat { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; margin:0; font-size:15px; }
   dl.stat dt { color:var(--muted); } dl.stat dd { margin:0; text-align:right; font-weight:600; }
   .warn { color:var(--err); } .mid { color:#d97a00; }
@@ -54,6 +61,22 @@
   <p class="sub">블루투스로 블랙코드 단말기 화면에 번호나 메모를 띄웁니다. 서버 없이 동작합니다.</p>
 
   <div class="card notice" id="noBt" hidden></div>
+
+  <div class="card" id="myCard">
+    <div class="cardhead"><b>내 단말기</b><span id="devName">연결 안 됨</span></div>
+    <div class="tiles">
+      <div class="tile"><div class="t">🔋 배터리</div><div class="v" id="vBatt">-</div><div class="s" id="sBatt">&nbsp;</div></div>
+      <div class="tile"><div class="t">🌡️ 차 안 온도</div><div class="v" id="vTemp">-</div><div class="s" id="sTemp">&nbsp;</div></div>
+    </div>
+    <div class="stateline"><span id="stateText">단말기를 연결하면 배터리·온도를 보여줍니다.</span><button type="button" id="btnRefresh" class="icon" title="지금 확인">↻</button></div>
+    <div class="hint warn" id="statWarn"></div>
+    <button id="btnSend">단말기에 전송</button>
+    <button id="btnPick" class="secondary">단말기 연결</button>
+    <div class="row"><label><input type="checkbox" id="allDev"> 목록에 안 보이면 체크 (모든 블루투스 기기 표시)</label></div>
+    <progress id="prog" value="0" max="1" hidden></progress>
+    <div id="status" style="margin-top:8px"></div>
+    <div class="hint">연결해두면 이 페이지가 열려 있는 동안 1분마다 자동으로 확인합니다.</div>
+  </div>
 
   <div class="card">
     <div class="seg" role="tablist">
@@ -82,20 +105,6 @@
     </div>
     <label>미리보기 (296×128)</label>
     <canvas id="preview" width="296" height="128"></canvas>
-  </div>
-
-  <div class="card">
-    <button id="btnSend">단말기에 연결해서 전송</button>
-    <div class="row"><label><input type="checkbox" id="allDev"> 목록에 안 보이면 체크 (모든 블루투스 기기 표시)</label></div>
-    <progress id="prog" value="0" max="1" hidden></progress>
-    <button id="btnStatus" class="secondary">단말기 상태만 확인</button>
-    <div id="status" style="margin-top:10px">대기 중</div>
-  </div>
-
-  <div class="card" id="statCard" hidden>
-    <label style="margin-top:0">단말기 상태</label>
-    <dl class="stat" id="stat"></dl>
-    <div class="hint" id="statWarn"></div>
   </div>
 
   <details class="card">
@@ -322,64 +331,101 @@ function be32(v) { return [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, 
 function be16(v) { return [(v >>> 8) & 255, v & 255]; }
 
 function batteryText(b) { return b >= 50 ? "충분" : b > 30 ? "보통" : b > 15 ? "낮음" : "교체 필요"; }
-function showStatus(st) {
-  $("statCard").hidden = false;
-  const bcls = st.batt <= 15 ? "warn" : st.batt <= 30 ? "mid" : "";
-  const safe = st.temp >= 0 && st.temp <= 50;
-  $("stat").innerHTML = "";
-  [["배터리", `${batteryText(st.batt)} (${st.batt})`, bcls], ["차 안 온도", `${st.temp}℃`, safe ? "" : "warn"],
-   ["시리얼", st.sn || "-", ""], ["확인 시각", new Date().toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" }), ""]]
-    .forEach(([k, v, c]) => {
-      const dt = document.createElement("dt"); dt.textContent = k;
-      const dd = document.createElement("dd"); dd.textContent = v; if (c) dd.className = c;
-      $("stat").append(dt, dd);
-    });
-  $("statWarn").textContent = safe ? "" : "0~50℃를 벗어나면 전자잉크 보호를 위해 화면을 바꾸지 않습니다.";
-  $("statWarn").className = "hint" + (safe ? "" : " warn");
+
+let myDev = null, running = false, silentRun = false, pendingOp = null, lastSt = null;
+try { lastSt = JSON.parse(store.get("lastStatus")); } catch (e) {}
+
+function relTime(t) {
+  const s = Math.floor((Date.now() - t) / 1000);
+  if (s < 60) return "방금";
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return new Date(t).toLocaleString("ko-KR", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-async function send(statusOnly = false) {
-  clearLog();
-  if (!navigator.bluetooth) { log("이 브라우저는 웹 블루투스를 지원하지 않습니다. 안드로이드 Chrome 또는 아이폰 Bluefy 앱을 사용하세요.", "err"); return; }
-  const btns = [$("btnSend"), $("btnStatus")]; btns.forEach(b => b.disabled = true);
+function renderCard(state) {
+  const name = myDev ? (myDev.name || "블랙코드") : store.get("devName");
+  $("devName").textContent = myDev ? name : (name ? `${name} (다시 연결 필요)` : "연결 안 됨");
+  $("btnPick").textContent = myDev ? "다른 단말기로 변경" : "단말기 연결";
+  if (lastSt) {
+    const b = lastSt.batt, t = lastSt.temp, safe = t >= 0 && t <= 50;
+    $("vBatt").textContent = batteryText(b);
+    $("vBatt").className = "v" + (b <= 15 ? " warn" : b <= 30 ? " mid" : "");
+    $("sBatt").textContent = `값 ${b}`;
+    $("vTemp").textContent = `${t}℃`;
+    $("vTemp").className = "v" + (safe ? "" : " warn");
+    $("sTemp").textContent = safe ? "정상" : "전송 불가";
+    $("statWarn").textContent = safe ? "" : "0~50℃를 벗어나면 전자잉크 보호를 위해 화면을 바꾸지 않습니다.";
+  }
+  const txt = $("stateText");
+  if (state === "checking") txt.textContent = "확인 중…";
+  else if (state === "unreachable") txt.textContent = "⚠️ 연결 안 됨 · 단말기 근처에서 다시 확인하세요";
+  else if (lastSt) txt.textContent = `✓ ${relTime(lastSt.at)} 확인`;
+  else txt.textContent = "단말기를 연결하면 배터리·온도를 보여줍니다.";
+}
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, new Promise((_, rej) => setTimeout(() => rej(new Error("시간 초과")), ms))]);
+}
+
+async function pickDevice() {
+  const opts = $("allDev").checked
+    ? { acceptAllDevices: true, optionalServices: [SVC] }
+    : { filters: [{ services: [SVC] }], optionalServices: [SVC] };
+  myDev = await navigator.bluetooth.requestDevice(opts);
+  store.set("devName", myDev.name || "블랙코드");
+  return myDev;
+}
+
+// One operation at a time. kind: "send" | "status". silent: background refresh (no log, no picker).
+async function runOp(kind, silent = false) {
+  if (!navigator.bluetooth) { if (!silent) { clearLog(); log("이 브라우저는 웹 블루투스를 지원하지 않습니다.", "err"); } return; }
+  if (running) {
+    if (silentRun && !silent && !pendingOp) { pendingOp = kind; clearLog(); log("잠시만요, 상태 확인이 끝나면 바로 시작합니다…"); }
+    return;
+  }
+  if (silent && !myDev) return;
+  running = true; silentRun = silent;
+  const btns = [$("btnSend"), $("btnPick"), $("btnRefresh")];
+  if (!silent) { clearLog(); btns.forEach(b => b.disabled = true); }
+  const L = (m, c) => { if (!silent) log(m, c); };
   const prog = $("prog"); prog.hidden = true;
-  let dev;
+  let dev = myDev;
   try {
-    const opts = $("allDev").checked
-      ? { acceptAllDevices: true, optionalServices: [SVC] }
-      : { filters: [{ services: [SVC] }], optionalServices: [SVC] };
-    dev = await navigator.bluetooth.requestDevice(opts);
-    log(`선택: ${dev.name || "(이름 없음)"} — 연결 중…`);
-    const gatt = await dev.gatt.connect();
+    if (!dev) dev = await pickDevice();
+    renderCard("checking");
+    L(`${dev.name || "단말기"} 연결 중…`);
+    const gatt = await withTimeout(dev.gatt.connect(), silent ? 12000 : 30000);
     const svc = await gatt.getPrimaryService(SVC);
 
-    // 1) Read current state
+    // 1) Status (battery, temperature)
     let appmode = 1, appid = 0, st = null;
     try {
       const v = await (await svc.getCharacteristic(READ)).readValue();
       const b = new Uint8Array(v.buffer);
       const txt = (a, s, e) => new TextDecoder().decode(a.slice(s, e)).replace(/\0/g, "").trim();
-      const sn = txt(b, 4, 14), w = v.getInt16(38), h = v.getInt16(36), batt = v.getInt8(42), temp = v.getInt8(45);
+      st = { sn: txt(b, 4, 14), batt: v.getInt8(42), temp: v.getInt8(45), at: Date.now() };
       if (b.length >= 64) { appmode = v.getInt32(52); appid = v.getInt32(56); }
-      st = { sn, batt, temp };
-      showStatus(st);
-      log(`시리얼 ${sn} · 화면 ${w}×${h} · 배터리 ${batt}(${batteryText(batt)}) · 온도 ${temp}℃`);
-    } catch (e) { log("상태 읽기 건너뜀: " + e.message); }
+      lastSt = st; store.set("lastStatus", JSON.stringify(st));
+      renderCard();
+      L(`시리얼 ${st.sn} · 배터리 ${st.batt}(${batteryText(st.batt)}) · 온도 ${st.temp}℃`);
+    } catch (e) { L("상태 읽기 건너뜀: " + e.message); }
 
-    if (statusOnly) {
-      log(st ? "상태 확인 완료" : "이 기기에서는 상태를 읽을 수 없습니다.", st ? "ok" : "err");
+    if (kind === "status") {
+      if (!st) { renderCard("unreachable"); L("이 기기에서는 상태를 읽을 수 없습니다.", "err"); }
+      else L("상태 확인 완료", "ok");
       dev.gatt.disconnect();
       return;
     }
     if (st && (st.temp > 50 || st.temp < 0)) {
-      log(`차 안 온도가 ${st.temp}℃라서 화면을 바꾸지 않았어요. 전자잉크 보호를 위해 0~50℃에서만 바꿀 수 있습니다(원래 앱과 같은 기준).`, "err");
+      L(`차 안 온도가 ${st.temp}℃라서 화면을 바꾸지 않았어요. 전자잉크 보호를 위해 0~50℃에서만 바꿀 수 있습니다(원래 앱과 같은 기준).`, "err");
       dev.gatt.disconnect();
       return;
     }
 
     // 2) Make sure the device is in display mode (appmode 1), as the app does on registration
     if (appmode !== 1) {
-      log("표시 모드로 전환 중…");
+      L("표시 모드로 전환 중…");
       const p = new Uint8Array(56);
       p.set(be32(Math.floor(Date.now() / 1000)), 0); p.set(be32(1), 4); p.set(be32(appid), 8); p.set(be32(10), 12);
       p.set(new TextEncoder().encode("H1A"), 16);
@@ -396,7 +442,7 @@ async function send(statusOnly = false) {
     const total = Math.ceil(bmp.length / CHUNK);
     const ch = await svc.getCharacteristic(DISP);
     prog.hidden = false; prog.max = total; prog.value = 0;
-    log(`화면 데이터 전송 (${bmp.length}바이트, ${total}개 패킷)…`);
+    L(`화면 데이터 전송 (${bmp.length}바이트, ${total}개 패킷)…`);
     for (let i = 0; i < total; i++) {
       const part = bmp.subarray(i * CHUNK, Math.min(bmp.length, (i + 1) * CHUNK));
       const pkt = new Uint8Array(PKT);
@@ -412,16 +458,48 @@ async function send(statusOnly = false) {
       await ch.writeValueWithResponse(pkt);
       prog.value = i + 1;
     }
-    log("전송 완료. 단말기 화면이 바뀔 때까지 몇 초 기다리세요.", "ok");
-    setTimeout(() => { try { dev.gatt.disconnect(); } catch (e) {} }, 3000);
+    L("전송 완료. 단말기 화면이 바뀔 때까지 몇 초 기다리세요.", "ok");
+    await new Promise(r => setTimeout(r, 3000));
+    try { dev.gatt.disconnect(); } catch (e) {}
   } catch (e) {
-    if (e.name === "NotFoundError") log("기기 선택이 취소됐거나 찾지 못했습니다. 목록에 안 보이면 위 체크박스를 켜고 다시 시도하세요.", "err");
-    else log("오류: " + e.message, "err");
-    try { dev && dev.gatt.disconnect(); } catch (_) {}
-  } finally { btns.forEach(b => b.disabled = false); }
+    if (e.name === "NotFoundError") L("기기 선택이 취소됐거나 찾지 못했습니다. 목록에 안 보이면 체크박스를 켜고 다시 시도하세요.", "err");
+    else { renderCard("unreachable"); L("오류: " + e.message, "err"); }
+    try { dev && dev.gatt.connected && dev.gatt.disconnect(); } catch (_) {}
+    return;
+  } finally {
+    running = false; silentRun = false;
+    btns.forEach(b => b.disabled = false);
+    if ($("stateText").textContent === "확인 중…") renderCard();
+    if (pendingOp) { const k = pendingOp; pendingOp = null; setTimeout(() => runOp(k), 500); }
+  }
 }
-$("btnSend").addEventListener("click", () => send(false));
-$("btnStatus").addEventListener("click", () => send(true));
+
+$("btnSend").addEventListener("click", () => runOp("send"));
+$("btnRefresh").addEventListener("click", () => runOp("status"));
+$("btnPick").addEventListener("click", async () => {
+  if (running) return;
+  try { await pickDevice(); renderCard(); runOp("status"); }
+  catch (e) { if (e.name !== "NotFoundError") { clearLog(); log("오류: " + e.message, "err"); } }
+});
+
+// Automatic refresh while the page is open and visible
+setInterval(() => { if (document.visibilityState === "visible") runOp("status", true); }, 60000);
+setInterval(() => { if (!running) renderCard(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") runOp("status", true); });
+
+// Chrome can hand back a previously-allowed device without showing the picker again.
+(async () => {
+  renderCard();
+  try {
+    if (navigator.bluetooth && navigator.bluetooth.getDevices) {
+      const devs = await navigator.bluetooth.getDevices();
+      const want = store.get("devName");
+      myDev = devs.find(d => d.name && d.name === want) || devs[0] || null;
+      renderCard();
+      if (myDev) runOp("status", true);
+    }
+  } catch (e) {}
+})();
 </script>
 </body>
 </html>
